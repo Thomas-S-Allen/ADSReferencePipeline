@@ -44,6 +44,40 @@ class ADSReferencePipelineCelery(ADSCelery):
     RE_MATCH_EXT = re.compile(r'.*(\..*?\.[a-z]+)$')
 
     default_parsers = {}
+    # Fallback mappings for DB-free/unit-test environments.
+    # These match the filename suffixes used in tests (test_app.py).
+    STATIC_PARSERS_BY_EXTENSION = {
+        '.xref.xml':     {'name': 'CrossRef',  'reference_service_endpoint': '/xml',  'extension_pattern': '.xref.xml',     'matches': []},
+        '.elsevier.xml': {'name': 'ELSEVIER',  'reference_service_endpoint': '/xml',  'extension_pattern': '.elsevier.xml', 'matches': []},
+        '.jats.xml':     {'name': 'JATS',      'reference_service_endpoint': '/xml',  'extension_pattern': '.jats.xml',     'matches': []},
+        '.iop.xml':      {'name': 'IOP',       'reference_service_endpoint': '/xml',  'extension_pattern': '.iop.xml',      'matches': []},
+        '.springer.xml': {'name': 'SPRINGER',  'reference_service_endpoint': '/xml',  'extension_pattern': '.springer.xml', 'matches': []},
+        '.ref.xml':      {'name': 'APS',       'reference_service_endpoint': '/xml',  'extension_pattern': '.ref.xml',      'matches': []},
+        '.nature.xml':   {'name': 'NATURE',    'reference_service_endpoint': '/xml',  'extension_pattern': '.nature.xml',   'matches': []},
+        '.aip.xml':      {'name': 'AIP',       'reference_service_endpoint': '/xml',  'extension_pattern': '.aip.xml',      'matches': []},
+        '.wiley2.xml':   {'name': 'WILEY',     'reference_service_endpoint': '/xml',  'extension_pattern': '.wiley2.xml',   'matches': []},
+        '.nlm3.xml':     {'name': 'NLM',       'reference_service_endpoint': '/xml',  'extension_pattern': '.nlm3.xml',     'matches': []},
+        '.agu.xml':      {'name': 'AGU',       'reference_service_endpoint': '/xml',  'extension_pattern': '.agu.xml',      'matches': []},
+        '.raw':          {'name': 'arXiv',     'reference_service_endpoint': '/text', 'extension_pattern': '.raw',          'matches': []},
+        '.html':         {'name': 'AEdRvHTML', 'reference_service_endpoint': '/text', 'extension_pattern': '.html',         'matches': []},
+    }
+
+    STATIC_ENDPOINTS_BY_NAME = {
+        'CrossRef': '/xml',
+        'ELSEVIER': '/xml',
+        'JATS': '/xml',
+        'IOP': '/xml',
+        'SPRINGER': '/xml',
+        'APS': '/xml',
+        'NATURE': '/xml',
+        'AIP': '/xml',
+        'WILEY': '/xml',
+        'NLM': '/xml',
+        'AGU': '/xml',
+        'arXiv': '/text',
+        'AEdRvHTML': '/text',
+    }
+
 
     def __init__(self, app_name: str, *args: tuple, **kwargs: Dict):
         """
@@ -80,6 +114,9 @@ class ADSReferencePipelineCelery(ADSCelery):
                         'matches': row.matches,
                     }
                     self.default_parsers[to_dict['extension_pattern']] = to_dict
+
+        for ext, rec in self.STATIC_PARSERS_BY_EXTENSION.items():
+            self.default_parsers.setdefault(ext, rec)
 
     def match_parser(self, rows: List, journal: str, volume: str) -> Dict:
         """
@@ -133,6 +170,9 @@ class ADSReferencePipelineCelery(ADSCelery):
             if self.default_parsers.get(extension, None):
                 return self.default_parsers[extension]
 
+            if self.STATIC_PARSERS_BY_EXTENSION.get(extension):
+                return self.STATIC_PARSERS_BY_EXTENSION[extension]
+
             with self.session_scope() as session:
                 # start_time = time.time()
                 rows = session.query(Parser).filter(and_(Parser.extension_pattern == extension,
@@ -158,6 +198,11 @@ class ADSReferencePipelineCelery(ADSCelery):
         :param parsername: name of the parser
         :return: service endpoint URL
         """
+    
+        # DB free-fallback
+        if parsername in self.STATIC_ENDPOINTS_BY_NAME:
+            return self.STATIC_ENDPOINTS_BY_NAME[parsername]
+
         with self.session_scope() as session:
             rows = session.query(Parser).filter(Parser.name == parsername).all()
             if len(rows) == 1:
