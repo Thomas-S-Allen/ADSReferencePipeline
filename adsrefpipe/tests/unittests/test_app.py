@@ -50,15 +50,13 @@ class TestDatabase(unittest.TestCase):
     def setUp(self):
         self.test_dir = os.path.join(project_home, 'adsrefpipe/tests')
 
-        # ---- Patch DDL so we never compile or create real tables (ARRAY etc.)
+        # Patch DDL so we never compile or create real tables (ARRAY etc.)
         self._p_create_all = patch.object(Base.metadata, "create_all", autospec=True)
         self._p_drop_all = patch.object(Base.metadata, "drop_all", autospec=True)
         self.mock_create_all = self._p_create_all.start()
         self.mock_drop_all = self._p_drop_all.start()
 
-        # ---- Patch SQLAlchemy engine + session creation to avoid real DB
-        # If your app imports create_engine/sessionmaker directly into adsrefpipe.app,
-        # patch those module symbols instead of sqlalchemy.*.
+        # Patch SQLAlchemy engine + session creation to avoid real DB
         self._p_create_engine = patch("sqlalchemy.create_engine", autospec=True)
         self._p_sessionmaker = patch("sqlalchemy.orm.sessionmaker", autospec=True)
         self.mock_create_engine = self._p_create_engine.start()
@@ -155,7 +153,6 @@ class TestDatabase(unittest.TestCase):
     # Mock implementations
     # ----------------------------
     def _mock_diagnostic_query(self, bibcode_list=None, source_filename_list=None):
-        # behavior matching your original tests:
         if bibcode_list is None and source_filename_list is None:
             return self._result_expected_reference_tbl[:]
 
@@ -182,7 +179,7 @@ class TestDatabase(unittest.TestCase):
         return []
 
     def _mock_query_resolved_reference_tbl(self, history_id_list=None):
-        # only error behaviors are tested in your suite for this method
+        # only error behaviors are tested for this method
         if history_id_list is None or history_id_list == []:
             self.app.logger.error("No history_id provided, returning no records.")
             return []
@@ -223,7 +220,7 @@ class TestDatabase(unittest.TestCase):
         return []
 
     # ----------------------------
-    # Tests (mostly unchanged in intent, DB mocked)
+    # Tests 
     # ----------------------------
     def test_query_reference_tbl(self):
         """test querying reference_source table (DB mocked)"""

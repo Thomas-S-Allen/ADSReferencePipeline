@@ -27,7 +27,7 @@ class TestTasks(unittest.TestCase):
         self.test_dir = os.path.join(project_home, 'adsrefpipe/tests')
         self.arXiv_stubdata_dir = os.path.join(self.test_dir, 'unittests/stubdata/txt/arXiv/0/')
 
-        # ---- Patch ADSCelery.__init__ so no real DB/session is constructed
+        # Patch ADSCelery.__init__ so no real DB/session is constructed
         self.p_ads_init = patch("adsrefpipe.app.ADSCelery.__init__", autospec=True, return_value=None)
         self.p_ads_init.start()
         self.addCleanup(self.p_ads_init.stop)
