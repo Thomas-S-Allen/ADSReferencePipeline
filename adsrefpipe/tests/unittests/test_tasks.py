@@ -31,7 +31,14 @@ class TestTasks(unittest.TestCase):
 
     def setUp(self):
         self.test_dir = os.path.join(project_home, 'adsrefpipe/tests')
-        unittest.TestCase.setUp(self)
+        self.arXiv_stubdata_dir = os.path.join(self.test_dir, 'unittests/stubdata/txt/arXiv/0/')
+
+        # Patch ADSCelery.__init__ so no real DB/session is constructed
+        self.p_ads_init = patch("adsrefpipe.app.ADSCelery.__init__", autospec=True, return_value=None)
+        self.p_ads_init.start()
+        self.addCleanup(self.p_ads_init.stop)
+
+        # Construct app (now safe because ADSCelery.__init__ is a no-op)
         self.app = app.ADSReferencePipelineCelery('test', local_config={
             'SQLALCHEMY_URL': self.postgresql_url,
             'SQLALCHEMY_ECHO': False,
