@@ -9,6 +9,7 @@ export PYTHONPATH="${APP_DIR}:${PYTHONPATH:-}"
 
 INPUT_PATH="${BENCHMARK_INPUT_PATH:-${APP_ROOT}/adsrefpipe/tests/unittests/stubdata}"
 EXTENSIONS="*.raw,*.xml,*.txt,*.html,*.tex,*.refs,*.pairs"
+DAYS_BACK=""
 MODE="mock"
 MAX_FILES=""
 TIMEOUT="900"
@@ -29,6 +30,7 @@ Usage: ${CONTAINER_APP_ROOT:-/app}/scripts/run-in-container-benchmark.bash [opti
 Options:
   --input-path PATH                  File or directory inside the container
   --extensions CSV                   Comma-separated file patterns
+  --days-back N                      Only include files modified within the last N days
   --max-files N                      Optional file cap
   --mode real|mock                   Benchmark mode
   --timeout N                        Benchmark timeout in seconds
@@ -53,6 +55,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --extensions)
       EXTENSIONS="$2"
+      shift 2
+      ;;
+    --days-back)
+      DAYS_BACK="$2"
       shift 2
       ;;
     --max-files)
@@ -145,6 +151,9 @@ BENCHMARK_CMD=(
   --group-by "${GROUP_BY}"
 )
 
+if [[ -n "${DAYS_BACK}" ]]; then
+  BENCHMARK_CMD+=(--days-back "${DAYS_BACK}")
+fi
 if [[ -n "${MAX_FILES}" ]]; then
   BENCHMARK_CMD+=(--max-files "${MAX_FILES}")
 fi
