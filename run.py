@@ -25,16 +25,16 @@ def _benchmark_continue_on_error() -> bool:
     return os.getenv("PERF_BENCHMARK_CONTINUE_ON_ERROR", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def positive_float(value: str) -> float:
+def non_negative_float(value: str) -> float:
     """
-    argparse type for positive floating point values.
+    argparse type for non-negative floating point values.
 
     :param value: CLI argument value to validate
     :return: validated float value
     """
     parsed_value = float(value)
-    if parsed_value <= 0:
-        raise argparse.ArgumentTypeError('time_delay must be greater than 0.')
+    if parsed_value < 0:
+        raise argparse.ArgumentTypeError('time_delay must be greater than or equal to 0.')
     return parsed_value
 
 
@@ -367,9 +367,9 @@ def main(argv=None) -> int:
                         '--time_delay',
                         dest='time_delay',
                         action='store',
-                        type=positive_float,
+                        type=non_negative_float,
                         default=config['REFERENCE_PIPELINE_DEFAULT_TIME_DELAY'],
-                        help='Add time delay between processing subdirectories for large batches. The delay time is batch size divided by input value in seconds. Defaults to REFERENCE_PIPELINE_DEFAULT_TIME_DELAY from config.')
+                        help='Add time delay between processing subdirectories for large batches. The delay time is batch size divided by input value in seconds. Defaults to REFERENCE_PIPELINE_DEFAULT_TIME_DELAY from config. Set to 0 to disable throttling.')
     resolve.add_argument('-sp',
                         '--skip_processed_directories',
                         dest='skip_processed',
@@ -453,7 +453,7 @@ def main(argv=None) -> int:
                     for subdir in source_filenames:
                         subdir_name = subdir[0].split('/')
                         subdir_name = "/".join(subdir_name[:-1])
-                        delay_time = float(len(subdir)) / delay_rate
+                        delay_time = float(len(subdir)) / delay_rate if delay_rate > 0 else 0.0
                         if args.skip_processed:
                             skip_file = args.skip_processed
                             try:
@@ -468,9 +468,10 @@ def main(argv=None) -> int:
                             processed_log.info(f"{subdir_name}")
                             logger.info(f"Processed subdirectoy: {subdir_name}")
                             print(f"Processed subdirectoy: {subdir_name}")
-                            logger.info(f"Pause for {delay_time} seconds to process")
-                            print(f"Pause for {delay_time} seconds to process")
-                            time.sleep(delay_time)
+                            if delay_rate > 0:
+                                logger.info(f"Pause for {delay_time} seconds to process")
+                                print(f"Pause for {delay_time} seconds to process")
+                                time.sleep(delay_time)
                         else:
                             print(f'Skipping {subdir_name}')
         elif args.confidence:

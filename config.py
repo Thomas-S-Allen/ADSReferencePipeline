@@ -10,7 +10,7 @@ REFERENCE_PIPELINE_SOLR_URL = 'https://dev.adsabs.harvard.edu/v1/search/query'
 REFERENCE_PIPELINE_MAX_NUM_REFERENCES = 1
 
 # db config
-SQLALCHEMY_URL = 'postgresql+psycopg2://postgres:postgres@localhost:5432/postgres'
+SQLALCHEMY_URL = 'postgresql+psycopg2://postgres:postgres@localhost:5433/postgres'
 SQLALCHEMY_TRACK_MODIFICATIONS = False
 SQLALCHEMY_ECHO = False
 
@@ -30,7 +30,7 @@ TASK_PROCESS_TIME = 30
 QUEUE_AUDIT_INTERVAL = 10
 
 # default delay rate divisor used for RESOLVE batch pauses
-REFERENCE_PIPELINE_DEFAULT_TIME_DELAY = 1000.0
+REFERENCE_PIPELINE_DEFAULT_TIME_DELAY = 0.0
 
 # true if to compare the resolved records with classic
 COMPARE_CLASSIC = True
