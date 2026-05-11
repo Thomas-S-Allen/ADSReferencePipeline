@@ -453,7 +453,6 @@ def main(argv=None) -> int:
                     for subdir in source_filenames:
                         subdir_name = subdir[0].split('/')
                         subdir_name = "/".join(subdir_name[:-1])
-                        delay_time = float(len(subdir)) / delay_rate if delay_rate > 0 else 0.0
                         if args.skip_processed:
                             skip_file = args.skip_processed
                             try:
@@ -466,9 +465,10 @@ def main(argv=None) -> int:
                         if subdir_name not in skip_files:
                             process_files(subdir)
                             processed_log.info(f"{subdir_name}")
-                            logger.info(f"Processed subdirectoy: {subdir_name}")
-                            print(f"Processed subdirectoy: {subdir_name}")
+                            logger.info(f"Processed subdirectory: {subdir_name}")
+                            print(f"Processed subdirectory: {subdir_name}")
                             if delay_rate > 0:
+                                delay_time = float(len(subdir)) / delay_rate
                                 logger.info(f"Pause for {delay_time} seconds to process")
                                 print(f"Pause for {delay_time} seconds to process")
                                 time.sleep(delay_time)
