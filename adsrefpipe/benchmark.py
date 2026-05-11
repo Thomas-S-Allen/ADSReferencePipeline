@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import logging
 import os
@@ -10,12 +11,18 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
+from datetime import timedelta
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, TypedDict
 
 try:
-    from adsputils import load_config
+    from adsputils import get_date, load_config
 except ImportError:  # pragma: no cover
+    def get_date(*args, **kwargs):
+        if args and args[0] == "1972":
+            return datetime(1972, 1, 1)
+        return datetime.now()
+
     def load_config(*args, **kwargs):
         return {}
 
@@ -93,6 +100,86 @@ def collect_candidate_files(input_path: str, extensions: Iterable[str]) -> List[
                     matched.append(full_path)
                     break
     return sorted(set(matched))
+
+
+def _flatten_grouped_files(grouped_files: Iterable[Iterable[str]]) -> List[str]:
+    flattened: List[str] = []
+    seen = set()
+    for group in grouped_files:
+        for filename in group:
+            if filename not in seen:
+                flattened.append(filename)
+                seen.add(filename)
+    return flattened
+
+
+def _fallback_grouped_source_filenames(
+    source_file_path: str,
+    file_extension: str,
+    date_cutoff: time.struct_time,
+) -> List[List[str]]:
+    from collections import defaultdict
+
+    groups = defaultdict(list)
+    root_label = "__ROOT__"
+
+    for root, _, files in os.walk(source_file_path):
+        for basename in files:
+            if fnmatch.fnmatch(basename, file_extension):
+                filename = os.path.join(root, basename)
+                if time.localtime(os.path.getmtime(filename)) >= date_cutoff:
+                    rel_dir = os.path.relpath(root, source_file_path)
+                    key = root_label if rel_dir in (".", "") else rel_dir.split(os.sep, 1)[0]
+                    groups[key].append(filename)
+
+    if not groups:
+        return []
+
+    result: List[List[str]] = []
+    if root_label in groups:
+        result.append(sorted(groups[root_label]))
+    for key in sorted(current_key for current_key in groups.keys() if current_key != root_label):
+        result.append(sorted(groups[key]))
+    return result
+
+
+def _resolve_run_source_filename_getter():
+    try:
+        import run as pipeline_run
+
+        return pipeline_run.get_source_filenames
+    except Exception:
+        return _fallback_grouped_source_filenames
+
+
+def collect_candidate_files_with_days_back(
+    input_path: str,
+    extensions: Iterable[str],
+    days_back: Optional[int],
+) -> List[str]:
+    if os.path.isfile(input_path):
+        return [input_path]
+
+    patterns = [pattern.strip() for pattern in extensions if pattern.strip()]
+    if not patterns:
+        patterns = ["*"]
+
+    if days_back is None:
+        return collect_candidate_files(input_path, patterns)
+
+    grouped_getter = _resolve_run_source_filename_getter()
+    date_cutoff = (get_date() - timedelta(days=int(days_back))).timetuple()
+    flattened: List[str] = []
+    seen = set()
+
+    for pattern in patterns:
+        grouped_files = grouped_getter(input_path, pattern, date_cutoff)
+        for filename in _flatten_grouped_files(grouped_files):
+            if filename not in seen:
+                flattened.append(filename)
+                seen.add(filename)
+
+    return flattened
 
 
 def classify_source_file(
@@ -209,6 +296,7 @@ def _run_warmup(files: List[str], mode: str) -> None:
 def _run_case(
     input_path: str,
     extensions: List[str],
+    days_back: Optional[int],
     max_files: Optional[int],
     mode: str,
     events_path: str,
@@ -218,7 +306,7 @@ def _run_case(
     group_by: str,
 ) -> Dict[str, Any]:
     config = load_config(proj_home=os.path.realpath(os.path.join(os.path.dirname(__file__), "../")))
-    all_files = collect_candidate_files(input_path, extensions)
+    all_files = collect_candidate_files_with_days_back(input_path, extensions, days_back)
     selected_files = all_files[:max_files] if max_files else all_files
 
     if not selected_files:
@@ -276,6 +364,7 @@ def _run_case(
         "context_id": context_id,
         "input_path": input_path,
         "extensions": extensions,
+        "days_back": days_back,
         "max_files": max_files,
         "mode": mode,
         "group_by": group_by,
@@ -306,6 +395,7 @@ def cmd_run(args) -> int:
     summary = _run_case(
         input_path=args.input_path,
         extensions=extensions,
+        days_back=args.days_back,
         max_files=args.max_files,
         mode=args.mode,
         events_path=events_path,
@@ -338,6 +428,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="File or directory to benchmark",
     )
     run_parser.add_argument("--extensions", default=DEFAULT_EXTENSIONS)
+    run_parser.add_argument("--days-back", type=int, default=None)
     run_parser.add_argument("--max-files", type=int, default=None)
     run_parser.add_argument("--mode", choices=["real", "mock"], default="mock")
     run_parser.add_argument("--output-dir", default=None)
