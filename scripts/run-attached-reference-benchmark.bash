@@ -8,6 +8,7 @@ INPUT_PATH="${INPUT_PATH:-${CONTAINER_APP_ROOT}/adsrefpipe/tests/unittests/stubd
 EXTENSIONS="*.raw,*.xml,*.txt,*.html,*.tex,*.refs,*.pairs"
 DAYS_BACK=""
 MODE="mock"
+ASYNC_MODE="enqueue-only"
 MAX_FILES=""
 TIMEOUT="900"
 READINESS_TIMEOUT="180"
@@ -29,6 +30,7 @@ Options:
   --days-back N                  Only include files modified within the last N days
   --max-files N                  Optional file cap
   --mode real|mock               Benchmark mode
+  --async-mode enqueue-only|end-to-end
   --timeout N                    Benchmark timeout in seconds
   --readiness-timeout N          Container readiness timeout in seconds
   --output-dir RELPATH           Host output directory relative to wrapper root
@@ -65,6 +67,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --mode)
       MODE="$2"
+      shift 2
+      ;;
+    --async-mode)
+      ASYNC_MODE="$2"
       shift 2
       ;;
     --timeout)
@@ -261,7 +267,7 @@ fi
 
 capture_host_context "${HOST_CONTEXT_PATH}"
 
-CONTAINER_COMMAND="${RUNNER_PATH} --input-path '${INPUT_PATH}' --extensions '${EXTENSIONS}' --mode '${MODE}' --timeout '${TIMEOUT}' --output-dir '${CONTAINER_OUTPUT_DIR}' --label '${CONTAINER_LABEL}' --run-stamp '${RUN_STAMP}' --system-sample-interval '${SYSTEM_SAMPLE_INTERVAL}' --group-by '${GROUP_BY}'"
+CONTAINER_COMMAND="${RUNNER_PATH} --input-path '${INPUT_PATH}' --extensions '${EXTENSIONS}' --mode '${MODE}' --async-mode '${ASYNC_MODE}' --timeout '${TIMEOUT}' --output-dir '${CONTAINER_OUTPUT_DIR}' --label '${CONTAINER_LABEL}' --run-stamp '${RUN_STAMP}' --system-sample-interval '${SYSTEM_SAMPLE_INTERVAL}' --group-by '${GROUP_BY}'"
 if [[ -n "${DAYS_BACK}" ]]; then
   CONTAINER_COMMAND+=" --days-back '${DAYS_BACK}'"
 fi

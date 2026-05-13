@@ -20,6 +20,7 @@ RUN_STAMP=""
 SYSTEM_SAMPLE_INTERVAL="1.0"
 DISABLE_SYSTEM_LOAD="false"
 GROUP_BY="source_type"
+ASYNC_MODE="enqueue-only"
 WARMUP="true"
 PROGRESS="true"
 
@@ -33,6 +34,7 @@ Options:
   --days-back N                      Only include files modified within the last N days
   --max-files N                      Optional file cap
   --mode real|mock                   Benchmark mode
+  --async-mode enqueue-only|end-to-end
   --timeout N                        Benchmark timeout in seconds
   --output-dir PATH                  Output directory inside the container
   --events-path PATH                 Perf events path inside the container
@@ -67,6 +69,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --mode)
       MODE="$2"
+      shift 2
+      ;;
+    --async-mode)
+      ASYNC_MODE="$2"
       shift 2
       ;;
     --timeout)
@@ -144,6 +150,7 @@ BENCHMARK_CMD=(
   --input-path "${INPUT_PATH}"
   --extensions "${EXTENSIONS}"
   --mode "${MODE}"
+  --async-mode "${ASYNC_MODE}"
   --timeout "${TIMEOUT}"
   --output-dir "${RUN_DIR}"
   --events-path "${EVENTS_PATH}"

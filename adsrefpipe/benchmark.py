@@ -7,6 +7,7 @@ import fnmatch
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -32,6 +33,7 @@ import adsrefpipe.utils as utils
 
 DEFAULT_EXTENSIONS = "*.raw,*.xml,*.txt,*.html,*.tex,*.refs,*.pairs"
 LOGGER = logging.getLogger(__name__)
+RE_RECORD_ID = re.compile(r"^H(?P<history_id>\d+)I(?P<item_num>\d+)$")
 
 
 class SourceFileClassification(TypedDict):
@@ -293,6 +295,98 @@ def _run_warmup(files: List[str], mode: str) -> None:
         return
 
 
+def _record_ids_for_stage(events: List[Dict[str, Any]], stage: str) -> set:
+    return {
+        str(event.get("record_id"))
+        for event in events
+        if event.get("stage") == stage and event.get("record_id")
+    }
+
+
+def _pending_record_ids_from_db(record_ids: set) -> set:
+    if not record_ids:
+        return set()
+
+    parsed_ids = []
+    for record_id in sorted(record_ids):
+        match = RE_RECORD_ID.match(str(record_id))
+        if not match:
+            parsed_ids.append((record_id, None, None))
+            continue
+        parsed_ids.append((record_id, int(match.group("history_id")), int(match.group("item_num"))))
+
+    valid_pairs = [(history_id, item_num) for _, history_id, item_num in parsed_ids if history_id is not None and item_num is not None]
+    if not valid_pairs:
+        return set(record_ids)
+
+    from adsrefpipe.models import ResolvedReference
+
+    run_module = _pipeline_run_module()
+    pending = set(record_ids)
+    with run_module.app.session_scope() as session:
+        rows = session.query(
+            ResolvedReference.history_id,
+            ResolvedReference.item_num,
+            ResolvedReference.bibcode,
+            ResolvedReference.scix_id,
+            ResolvedReference.score,
+        ).all()
+
+    state_by_key = {
+        (int(row.history_id), int(row.item_num)): row
+        for row in rows
+        if (int(row.history_id), int(row.item_num)) in valid_pairs
+    }
+    for record_id, history_id, item_num in parsed_ids:
+        if history_id is None or item_num is None:
+            continue
+        row = state_by_key.get((history_id, item_num))
+        if not row:
+            continue
+        if row.bibcode != "0000" or row.scix_id != "0000" or float(row.score) != -1.0:
+            pending.discard(record_id)
+    return pending
+
+
+def _wait_for_async_completion(
+    run_id: str,
+    context_id: str,
+    events_path: str,
+    timeout_s: int,
+) -> Dict[str, Any]:
+    deadline = time.time() + max(1, int(timeout_s))
+    submitted_ids = set()
+    completed_ids = set()
+    while time.time() < deadline:
+        events = perf_metrics.load_events(events_path, run_id=run_id, context_id=context_id)
+        submitted_ids = _record_ids_for_stage(events, "record_submit")
+        completed_ids = _record_ids_for_stage(events, "record_wall")
+        if submitted_ids and completed_ids.issuperset(submitted_ids):
+            return {
+                "submitted_record_ids": submitted_ids,
+                "completed_record_ids": completed_ids,
+                "completion_source": "events",
+                "timed_out": False,
+            }
+        time.sleep(0.5)
+
+    pending_ids = submitted_ids - completed_ids if submitted_ids else set()
+    pending_db_ids = _pending_record_ids_from_db(pending_ids)
+    if submitted_ids and not pending_db_ids:
+        return {
+            "submitted_record_ids": submitted_ids,
+            "completed_record_ids": submitted_ids,
+            "completion_source": "db_fallback",
+            "timed_out": False,
+        }
+    return {
+        "submitted_record_ids": submitted_ids,
+        "completed_record_ids": completed_ids,
+        "completion_source": None,
+        "timed_out": True,
+    }
+
+
 def _run_case(
     input_path: str,
     extensions: List[str],
@@ -304,6 +398,8 @@ def _run_case(
     system_load_enabled: bool,
     warmup: bool,
     group_by: str,
+    async_mode: str,
+    timeout_s: int,
 ) -> Dict[str, Any]:
     config = load_config(proj_home=os.path.realpath(os.path.join(os.path.dirname(__file__), "../")))
     all_files = collect_candidate_files_with_days_back(input_path, extensions, days_back)
@@ -325,6 +421,7 @@ def _run_case(
             system_samples.append(perf_metrics.collect_system_sample())
 
     sampler_thread = None
+    completion_state = None
     start_wall = time.time()
     with benchmark_environment(run_id=run_id, context_id=context_id, events_path=events_path, mode=mode, config=config):
         try:
@@ -335,6 +432,13 @@ def _run_case(
 
             with mock_resolver(mode == "mock"):
                 _pipeline_run_module().process_files(selected_files)
+            if async_mode == "end-to-end":
+                completion_state = _wait_for_async_completion(
+                    run_id=run_id,
+                    context_id=context_id,
+                    events_path=events_path,
+                    timeout_s=timeout_s,
+                )
         finally:
             if system_load_enabled:
                 sampler_stop.set()
@@ -368,12 +472,31 @@ def _run_case(
         "max_files": max_files,
         "mode": mode,
         "group_by": group_by,
+        "async_mode": async_mode,
         "git_commit": _safe_git_commit(),
         "timestamp_utc": _utc_timestamp(),
         "system_sample_interval_s": system_sample_interval_s,
         "system_load_enabled": system_load_enabled,
         "warmup": bool(warmup),
+        "timeout_s": int(timeout_s),
     }
+    if async_mode == "end-to-end":
+        completion_state = completion_state or {
+            "submitted_record_ids": set(),
+            "completed_record_ids": set(),
+            "completion_source": None,
+            "timed_out": False,
+        }
+        summary["async_completion"] = {
+            "submitted_record_count": len(completion_state["submitted_record_ids"]),
+            "completed_record_count": len(completion_state["completed_record_ids"]),
+            "completion_source": completion_state["completion_source"],
+            "timed_out": bool(completion_state["timed_out"]),
+        }
+        if completion_state["completion_source"] == "db_fallback":
+            summary["counts"]["records_processed"] = len(completion_state["submitted_record_ids"])
+        if completion_state["timed_out"]:
+            summary["status"] = "incomplete"
     summary["selected_files"] = selected_files
     summary["counts"]["files_selected"] = len(selected_files)
     summary["system_load"] = perf_metrics.aggregate_system_samples(
@@ -403,6 +526,8 @@ def cmd_run(args) -> int:
         system_load_enabled=not bool(args.disable_system_load),
         warmup=bool(args.warmup),
         group_by=args.group_by,
+        async_mode=args.async_mode,
+        timeout_s=args.timeout,
     )
 
     artifacts = _write_run_artifacts(summary, output_dir=output_dir)
@@ -431,6 +556,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--days-back", type=int, default=None)
     run_parser.add_argument("--max-files", type=int, default=None)
     run_parser.add_argument("--mode", choices=["real", "mock"], default="mock")
+    run_parser.add_argument("--async-mode", choices=["enqueue-only", "end-to-end"], default="enqueue-only")
     run_parser.add_argument("--output-dir", default=None)
     run_parser.add_argument("--events-path", default=None)
     run_parser.add_argument("--timeout", type=int, default=900)

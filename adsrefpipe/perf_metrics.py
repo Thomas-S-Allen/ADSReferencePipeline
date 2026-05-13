@@ -11,6 +11,7 @@ import logging
 import os
 import platform
 import re
+import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -138,7 +139,27 @@ def metrics_context_dir(config: Optional[dict] = None) -> Optional[str]:
     base_path = metrics_path(config=config)
     if base_path:
         return os.path.join(os.path.dirname(base_path), "perf_run_context")
-    return None
+    return os.path.join(tempfile.gettempdir(), "adsrefpipe_perf_run_context")
+
+
+def _record_context_dir(config: Optional[dict] = None, context_dir: Optional[str] = None) -> Optional[str]:
+    base_dir = context_dir or metrics_context_dir(config=config)
+    if not base_dir:
+        return None
+    return os.path.join(base_dir, "record_context")
+
+
+def _record_context_path(
+    record_id: Any,
+    config: Optional[dict] = None,
+    context_dir: Optional[str] = None,
+) -> Optional[str]:
+    if record_id is None:
+        return None
+    directory = _record_context_dir(config=config, context_dir=context_dir)
+    if not directory:
+        return None
+    return os.path.join(directory, "record_%s.json" % str(record_id))
 
 
 def current_run_id() -> Optional[str]:
@@ -320,6 +341,44 @@ def register_run_metrics_context(
         return
 
 
+def register_record_metrics_context(
+    record_id: Any,
+    run_id: Any,
+    enabled: bool,
+    path: Optional[str],
+    context_id: Optional[str] = None,
+    config: Optional[dict] = None,
+    context_dir: Optional[str] = None,
+) -> None:
+    try:
+        target = _record_context_path(record_id, config=config, context_dir=context_dir)
+        if not target:
+            return
+        directory = os.path.dirname(target)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        payload = {
+            "enabled": bool(enabled),
+            "path": path,
+            "run_id": str(run_id) if run_id is not None else None,
+            "context_id": context_id,
+            "updated_at": time.time(),
+        }
+        with open(target, "w") as handle:
+            json.dump(payload, handle, sort_keys=True)
+    except Exception as exc:
+        _metrics_debug(
+            "Failed to register record metrics context",
+            record_id=record_id,
+            run_id=run_id,
+            context_id=context_id,
+            path=path,
+            context_dir=context_dir,
+            error=str(exc),
+        )
+        return
+
+
 def resolve_run_metrics_context(
     run_id: Any,
     config: Optional[dict] = None,
@@ -347,6 +406,33 @@ def resolve_run_metrics_context(
             error=str(exc),
         )
         return {"enabled": None, "path": None, "context_id": None}
+
+
+def resolve_record_metrics_context(
+    record_id: Any,
+    config: Optional[dict] = None,
+    context_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    target = _record_context_path(record_id, config=config, context_dir=context_dir)
+    if not target or not os.path.exists(target):
+        return {"enabled": None, "path": None, "run_id": None, "context_id": None}
+    try:
+        with open(target, "r") as handle:
+            payload = json.load(handle)
+        return {
+            "enabled": payload.get("enabled"),
+            "path": payload.get("path"),
+            "run_id": payload.get("run_id"),
+            "context_id": payload.get("context_id"),
+        }
+    except Exception as exc:
+        _metrics_debug(
+            "Failed to resolve record metrics context",
+            record_id=record_id,
+            target=target,
+            error=str(exc),
+        )
+        return {"enabled": None, "path": None, "run_id": None, "context_id": None}
 
 
 def _append_jsonl_record(target_path: str, payload: Dict[str, Any]) -> None:
@@ -822,6 +908,8 @@ def aggregate_ads_events(
     raw_subfamily_groups = {}
     file_names = set()
     record_ids = set()
+    processed_record_ids = set()
+    submitted_record_ids = set()
     records_submitted = 0
     failure_count = 0
 
@@ -860,6 +948,10 @@ def aggregate_ads_events(
             file_names.add(source_filename)
         if record_id:
             record_ids.add(record_id)
+            if stage == "record_submit":
+                submitted_record_ids.add(record_id)
+            if stage == "record_wall":
+                processed_record_ids.add(record_id)
 
         if status != "ok":
             failure_count += 1
@@ -867,6 +959,8 @@ def aggregate_ads_events(
 
         if stage == "ingest_enqueue":
             records_submitted += int(extra.get("record_count", 1) or 1)
+        elif stage == "record_submit" and record_id:
+            records_submitted = max(records_submitted, len(submitted_record_ids))
 
         if duration is None:
             continue
@@ -916,7 +1010,8 @@ def aggregate_ads_events(
 
     throughput = None
     if wall_duration_s and wall_duration_s > 0:
-        throughput = (float(len(record_ids) or records_submitted) / float(wall_duration_s)) * 60.0
+        throughput_basis = len(processed_record_ids) or len(submitted_record_ids) or records_submitted
+        throughput = (float(throughput_basis) / float(wall_duration_s)) * 60.0
 
     def _serialize_group(groups: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         output = {}
@@ -947,7 +1042,7 @@ def aggregate_ads_events(
             "files_selected": int(expected_files or 0),
             "files_processed": len(file_names),
             "records_submitted": records_submitted,
-            "records_processed": len(record_ids),
+            "records_processed": len(processed_record_ids),
             "failures": failure_count,
         },
         "throughput": {

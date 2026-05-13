@@ -120,6 +120,32 @@ def queue_references(references: list, source_filename: str, source_bibcode: str
         extra=event_extra,
     ):
         for reference in references:
+            record_id = reference.get('id')
+            current_run_id = perf_metrics.current_run_id()
+            current_context_id = perf_metrics.current_context_id()
+            current_metrics_path = perf_metrics.metrics_path(config=config)
+            if current_run_id and record_id:
+                perf_metrics.register_record_metrics_context(
+                    record_id=record_id,
+                    run_id=current_run_id,
+                    enabled=True,
+                    path=current_metrics_path,
+                    context_id=current_context_id,
+                    config=config,
+                )
+                perf_metrics.emit_event(
+                    stage='record_submit',
+                    record_id=record_id,
+                    extra=perf_metrics.build_event_extra(
+                        source_filename=source_filename,
+                        parser_name=parsername,
+                        source_bibcode=source_bibcode,
+                        input_extension=event_extra.get('input_extension'),
+                        source_type=event_extra.get('source_type'),
+                        record_count=1,
+                    ),
+                    config=config,
+                )
             reference_task = {'reference': reference,
                               'source_bibcode': source_bibcode,
                               'source_filename': source_filename,

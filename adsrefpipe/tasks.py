@@ -54,16 +54,26 @@ def task_process_reference(reference_task: dict) -> bool:
         record_count=1,
     )
     record_id = reference_record.get('id')
+    benchmark_context = perf_metrics.resolve_record_metrics_context(record_id, config=config) if record_id else {}
+    benchmark_run_id = benchmark_context.get('run_id')
+    benchmark_context_id = benchmark_context.get('context_id')
+    benchmark_path = benchmark_context.get('path')
     try:
         with perf_metrics.timed_stage(
             stage='record_wall',
+            run_id=benchmark_run_id,
+            context_id=benchmark_context_id,
             record_id=record_id,
             extra=event_extra,
+            path=benchmark_path,
         ):
             with perf_metrics.timed_stage(
                 stage='resolver_http',
+                run_id=benchmark_run_id,
+                context_id=benchmark_context_id,
                 record_id=record_id,
                 extra=event_extra,
+                path=benchmark_path,
             ):
                 resolved = utils.post_request_resolved_reference(reference_payload, reference_task['resolver_service_url'])
             # if failed to connect to reference service, raise a exception to requeue, for max_retries times
@@ -75,8 +85,11 @@ def task_process_reference(reference_task: dict) -> bool:
 
             with perf_metrics.timed_stage(
                 stage='post_resolved_db',
+                run_id=benchmark_run_id,
+                context_id=benchmark_context_id,
                 record_id=record_id,
                 extra=event_extra,
+                path=benchmark_path,
             ):
                 status = app.populate_tables_post_resolved(resolved, reference_task['source_bibcode'], classic_resolved_filename)
             if not status:
