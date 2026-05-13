@@ -154,7 +154,7 @@ def queue_references(references: list, source_filename: str, source_bibcode: str
                               'input_extension': event_extra.get('input_extension'),
                               'source_type': event_extra.get('source_type')}
             try:
-                tasks.task_process_reference(reference_task)
+                tasks.task_process_reference.delay(reference_task)
             except Exception as exc:
                 if not _benchmark_continue_on_error():
                     raise
