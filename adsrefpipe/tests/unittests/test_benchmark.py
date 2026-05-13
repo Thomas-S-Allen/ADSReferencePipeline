@@ -234,6 +234,12 @@ class TestBenchmark(unittest.TestCase):
         ])
         self.assertEqual(args.async_mode, "end-to-end")
 
+    def test_build_parser_defaults_to_end_to_end(self):
+        args = benchmark.build_parser().parse_args([
+            "run",
+        ])
+        self.assertEqual(args.async_mode, "end-to-end")
+
     def test_cmd_run_with_fake_pipeline_generates_artifacts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             input_path = os.path.join(tmpdir, "input")
@@ -267,6 +273,7 @@ class TestBenchmark(unittest.TestCase):
                 "--output-dir", tmpdir,
                 "--events-path", events_path,
                 "--days-back", "1",
+                "--async-mode", "enqueue-only",
                 "--no-warmup",
                 "--disable-system-load",
             ])
@@ -477,6 +484,59 @@ class TestBenchmark(unittest.TestCase):
 
             self.assertEqual(summary["status"], "complete")
             self.assertEqual(summary["counts"]["records_submitted"], 1)
+            self.assertEqual(summary["counts"]["records_processed"], 1)
+            self.assertEqual(summary["async_completion"]["completion_source"], "events")
+
+    def test_run_case_end_to_end_timeout_zero_waits_for_completion(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sample_file = os.path.join(tmpdir, "sample.raw")
+            with open(sample_file, "w") as handle:
+                handle.write("content")
+            events_path = os.path.join(tmpdir, "events.jsonl")
+
+            def fake_process_files(files):
+                extra = {
+                    "source_filename": files[0],
+                    "source_type": ".raw",
+                    "input_extension": ".raw",
+                    "parser_name": "arXiv",
+                    "record_count": 1,
+                }
+                benchmark.perf_metrics.emit_event("ingest_enqueue", extra=extra)
+                benchmark.perf_metrics.emit_event("record_submit", record_id="H1I1", extra=extra)
+                benchmark.perf_metrics.emit_event("file_wall", duration_ms=12.0, extra=extra)
+
+                def emit_worker_events():
+                    time.sleep(0.1)
+                    benchmark.perf_metrics.emit_event("resolver_http", record_id="H1I1", duration_ms=4.0, extra=extra)
+                    benchmark.perf_metrics.emit_event("post_resolved_db", record_id="H1I1", duration_ms=3.0, extra=extra)
+                    benchmark.perf_metrics.emit_event("record_wall", record_id="H1I1", duration_ms=12.0, extra=extra)
+
+                worker = __import__("threading").Thread(target=emit_worker_events, daemon=True)
+                worker.start()
+
+            class FakePipelineRun:
+                @staticmethod
+                def process_files(files):
+                    return fake_process_files(files)
+
+            with patch.object(benchmark, "_pipeline_run_module", return_value=FakePipelineRun):
+                summary = benchmark._run_case(
+                    input_path=tmpdir,
+                    extensions=["*.raw"],
+                    days_back=None,
+                    max_files=1,
+                    mode="mock",
+                    events_path=events_path,
+                    system_sample_interval_s=0.01,
+                    system_load_enabled=False,
+                    warmup=False,
+                    group_by="source_type",
+                    async_mode="end-to-end",
+                    timeout_s=0,
+                )
+
+            self.assertEqual(summary["status"], "complete")
             self.assertEqual(summary["counts"]["records_processed"], 1)
             self.assertEqual(summary["async_completion"]["completion_source"], "events")
 

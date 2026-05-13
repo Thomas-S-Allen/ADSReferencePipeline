@@ -8,7 +8,7 @@ INPUT_PATH="${INPUT_PATH:-${CONTAINER_APP_ROOT}/adsrefpipe/tests/unittests/stubd
 EXTENSIONS="*.raw,*.xml,*.txt,*.html,*.tex,*.refs,*.pairs"
 DAYS_BACK=""
 MODE="mock"
-ASYNC_MODE="enqueue-only"
+ASYNC_MODE="end-to-end"
 MAX_FILES=""
 TIMEOUT="900"
 READINESS_TIMEOUT="180"
@@ -31,7 +31,7 @@ Options:
   --max-files N                  Optional file cap
   --mode real|mock               Benchmark mode
   --async-mode enqueue-only|end-to-end
-  --timeout N                    Benchmark timeout in seconds
+  --timeout N                    Benchmark timeout in seconds; 0 disables timeout
   --readiness-timeout N          Container readiness timeout in seconds
   --output-dir RELPATH           Host output directory relative to wrapper root
   --runner-path PATH             In-container runner path

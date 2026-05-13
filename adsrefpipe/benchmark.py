@@ -354,10 +354,11 @@ def _wait_for_async_completion(
     events_path: str,
     timeout_s: int,
 ) -> Dict[str, Any]:
-    deadline = time.time() + max(1, int(timeout_s))
+    timeout_value = int(timeout_s)
+    deadline = None if timeout_value <= 0 else time.time() + timeout_value
     submitted_ids = set()
     completed_ids = set()
-    while time.time() < deadline:
+    while deadline is None or time.time() < deadline:
         events = perf_metrics.load_events(events_path, run_id=run_id, context_id=context_id)
         submitted_ids = _record_ids_for_stage(events, "record_submit")
         completed_ids = _record_ids_for_stage(events, "record_wall")
@@ -556,10 +557,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--days-back", type=int, default=None)
     run_parser.add_argument("--max-files", type=int, default=None)
     run_parser.add_argument("--mode", choices=["real", "mock"], default="mock")
-    run_parser.add_argument("--async-mode", choices=["enqueue-only", "end-to-end"], default="enqueue-only")
+    run_parser.add_argument("--async-mode", choices=["enqueue-only", "end-to-end"], default="end-to-end")
     run_parser.add_argument("--output-dir", default=None)
     run_parser.add_argument("--events-path", default=None)
-    run_parser.add_argument("--timeout", type=int, default=900)
+    run_parser.add_argument("--timeout", type=int, default=900, help="Benchmark timeout in seconds; 0 disables timeout")
     run_parser.add_argument("--system-sample-interval", type=_sample_interval_arg, default=1.0)
     run_parser.add_argument("--disable-system-load", action="store_true", default=False)
     run_parser.add_argument("--group-by", choices=["source_type", "parser", "none"], default="source_type")
